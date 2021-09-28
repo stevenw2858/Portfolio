@@ -1,0 +1,115 @@
+---
+title: "Airline Stock Forecast with Neural Network"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r, echo=FALSE, message=F, warning=F}
+#setwd("/Users/")
+#getwd()
+library(fpp2)
+library(tis)
+require(dplyr)
+library(lubridate)
+library(urca)
+library(sweep)
+
+airline <- read.csv(file = 'C:/Users/Steve/Documents/Santa Clara University Classes/Spring 2021/Time Series/Final Project/Airlines.csv')
+```
+
+```{r}
+
+summary(airline)
+
+airline2 <- read.csv(file = 'C:/Users/Steve/Documents/Santa Clara University Classes/Spring 2021/Time Series/Final Project/Airlines.csv')
+
+AAL.ts <- ts(airline2$AAL)
+UAL.ts <- ts(airline2$UAL)
+DAL.ts<- ts(airline2$DAL)
+
+autoplot(mstl(AAL.ts))
+
+autoplot(mstl(UAL.ts))
+
+autoplot(mstl(DAL.ts))
+
+
+```
+
+
+```{r}
+#Ideal Neural Network
+#Our data disadvantage because at Q1 2020, there was a huge dip in the stock price.
+#This example is ideal without taking into account the stock dip.
+
+exset <- window(DAL.ts, end=c(900))
+autoplot(exset)+xlab("Day")+ylab("Stock Price (USD)")
+
+fitex <- nnetar(exset, lambda=0)
+autoplot(forecast(fitex,h=300))+ xlab("Day")+ylab("Stock Price (USD)")
+
+simex <- ts(matrix(0, nrow=300L, ncol=7L),
+  start=end(exset)[1L]+1L)
+for(i in seq(7))
+  simex[,i] <- simulate(fitex, nsim=300L)
+autoplot(exset) + autolayer(simex) +xlab("Day")+ylab("Stock Price (USD)")
+
+
+fcastex <- forecast(fitex, PI=TRUE, h=300)
+autoplot(fcastex) +xlab("Day")+ylab("Stock Price (USD)")
+
+
+```
+
+```{r}
+fit1 <- nnetar(AAL.ts, lambda=0)
+autoplot(forecast(fit1,h=300))+ xlab("Day")+ylab("Stock Price (USD)")
+
+sim <- ts(matrix(0, nrow=300L, ncol=7L),
+  start=end(AAL.ts)[1L]+1L)
+for(i in seq(7))
+  sim[,i] <- simulate(fit1, nsim=300L)
+autoplot(AAL.ts) + autolayer(sim)+xlab("Day")+ylab("Stock Price (USD)")
+
+#Please note, running these 2 below takes a very long time. Example h=30 takes 1 min, so 365 takes a while as this is fit
+fcast1 <- forecast(fit1, PI=TRUE, h=300)
+autoplot(fcast1)+xlab("Day")+ylab("Stock Price (USD)")
+```
+
+```{r}
+fit2 <- nnetar(UAL.ts, lambda=0)
+autoplot(forecast(fit2,h=100))+xlab("Day")+ylab("Stock Price (USD)")
+
+sim2 <- ts(matrix(0, nrow=100L, ncol=7L),
+  start=end(UAL.ts)[1L]+1L)
+for(i in seq(7))
+  sim2[,i] <- simulate(fit2, nsim=100L)
+autoplot(UAL.ts) + autolayer(sim2)+xlab("Day")+ylab("Stock Price (USD)")
+
+fcast2 <- forecast(fit2, PI=TRUE, h=100)
+autoplot(fcast2)+xlab("Day")+ylab("Stock Price (USD)")
+
+```
+
+```{r}
+fit3 <- nnetar(DAL.ts, lambda=0)
+autoplot(forecast(fit3,h=100))+xlab("Day")+ylab("Stock Price (USD)")
+
+sim3 <- ts(matrix(0, nrow=100L, ncol=7L),
+  start=end(DAL.ts)[1L]+1L)
+for(i in seq(7))
+  sim3[,i] <- simulate(fit3, nsim=100L)
+autoplot(DAL.ts) + autolayer(sim3)+xlab("Day")+ylab("Stock Price (USD)")
+
+fcast3 <- forecast(fit3, PI=TRUE, h=100)
+autoplot(fcast3)+xlab("Day")+ylab("Stock Price (USD)")
+
+```
+
+```{r}
+sweep::sw_glance(fit1)
+sweep::sw_glance(fit2)
+sweep::sw_glance(fit3)
+
+```
