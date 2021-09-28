@@ -1,0 +1,327 @@
+---
+title: "Nike Campaign"
+author: "Steven Wang, Ava Zhang, Shikha Binani"
+date: "3/12/21"
+output:
+  pdf_document: default
+  html_document: default
+graphics: yes
+urlcolor: blue
+---
+
+```{r setup, echo=FALSE, message=F, warning=F, comment=""}
+
+rm(list=ls())       
+library(data.table) 
+library(MASS)
+library(ROCR)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(tm)
+library(tidytext)
+library(tidyverse)
+library(syuzhet)
+library(stargazer)
+library(doBy)
+library(dplyr)
+library(ggplot2)
+library(readstata13)
+library(stargazer)
+library(AER)
+
+nike <- fread('justdoit_tweets_Nike_2018 work file.csv')
+nikesummary=read.csv('justdoit_tweets_Nike_2018 work file.csv')
+
+```
+
+```{r, echo=FALSE, message=F, warning=F, comment=""}
+#Summary Table
+
+nike[,retweets:=as.numeric(tweet_retweet_count>0),]
+dim(nike)
+
+stargazer(nikesummary[c("tweet_retweet_count", "user_followers_count", "user_friends_count", "user_lang", "user_verified")], type="text", median=TRUE, digits=2, title="Summary of Tweets", flip=TRUE, covariate.labels=c("Tweet retweet count", "User follower count", "User Friend Count", "Language (1 if English)", "User Verified (1 if verified user)"))
+
+```
+
+```{r, echo=FALSE, message=F, warning=F, comment=""}
+#Hour from when Tweets collected
+nike$tweet_created_at <- format(as.POSIXct(nike$tweet_created_at, format = "%a %b %d %H:%M:%S %z %Y"), "%H:%M:%S")
+nike$tweet_created_at <- hms(nike$tweet_created_at)
+hours <- as.data.frame(hour(nike$tweet_created_at))
+
+hours %>% 
+  group_by(`hour(nike$tweet_created_at)`) %>%
+  summarise(total = n()) %>%
+  ggplot(aes(x = `hour(nike$tweet_created_at)`, y = total)) +
+  geom_line() 
+```
+
+```{r summary, echo=FALSE, message=F, warning=F, comment=""}
+glimpse(nike)
+
+```
+
+```{r Sentimental_Analysis_code, echo=FALSE, message=F, warning=F, comment=""}
+
+#remove user mention tags
+r_user <- function(x) {
+  str_replace_all(x, '(@[[:alnum:]_]*)', '')
+}
+
+# remove hashtags
+r_hashtags <- function(x) {
+  str_replace_all(x, '(#[[:alnum:]_]*)', '')
+}
+
+#remove urls from tag
+r_url <- function(x) {
+  str_replace_all(x, 'http[^[:blank:]]+', '')
+}
+
+#clean up as many contractions as possible
+contractions <- function(doc) {
+  doc <- gsub("won't", "will not", doc)
+  doc <- gsub("can't", "can not", doc)
+  doc <- gsub("n't", " not", doc)
+  doc <- gsub("'ll", " will", doc)
+  doc <- gsub("'re", " are", doc)
+  doc <- gsub("'ve", " have", doc)
+  doc <- gsub("i'm", " I am", doc)
+  doc <- gsub("they’re", "they are", doc)
+  doc <- gsub("you’re", "you are", doc)
+  doc <- gsub("y’all", "you all", doc)
+  doc <- gsub("'d", "would", doc)
+  doc <- gsub("i’ve", "i have", doc)
+  doc <- gsub("that’s", "that is", doc)
+  doc <- gsub("i’ll", " i will", doc)
+  doc <- gsub("'s", "", doc)
+  doc <- gsub("can’t", "cannot", doc)
+  doc <- gsub("it's", "it is", doc)
+  doc <- gsub("don't", "do not", doc)
+  return(doc)
+}
+
+# remove special characters
+r_schars <- function(x) gsub("[^a-zA-Z0-9 ]", " ", x)
+nike$tweet_full_text <- sapply(nike$tweet_full_text, r_schars)
+nike$tweet_full_text <- sapply(nike$tweet_full_text, contractions)
+nike$tweet_full_text <- sapply(nike$tweet_full_text, r_user)
+nike$tweet_full_text <- sapply(nike$tweet_full_text, r_hashtags)
+nike$tweet_full_text <- sapply(nike$tweet_full_text, r_url)
+#remove number fromthe tweets using tm packages
+nike$tweet_full_text <- sapply(nike$tweet_full_text, removeNumbers)
+
+tidy_text <- nike %>%
+  select(tweet_full_text) %>%
+  unnest_tokens(word, tweet_full_text) %>%
+  anti_join(stop_words) 
+
+#Summary of most used words
+tidy_text %>%
+  group_by(word) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total)) %>%
+  top_n(20) %>%
+  ggplot(aes(reorder(x = word, total), y = total)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Most Used Word in Tweets",
+       x = "Word",
+       y = "Total")
+```
+
+
+```{r sentiment pt 2, echo=FALSE, message=F, warning=F, comment=""}
+#Sentimental analysis summary. Find number of Positive/Negative/Neutral Tweets.
+tidy_tweet <- nike %>%
+  select(tweet_full_text)
+
+word.df <- as.vector(nike$tweet_full_text)
+
+#assign sentiment score
+sent.value <- get_sentiment(word.df)
+most.positive <- word.df[sent.value == max(sent.value)]
+most.negative <- word.df[sent.value <= min(sent.value)] 
+
+category <- ifelse(sent.value < 0, "Negative", ifelse(sent.value > 0, "Positive", "Neutral"))
+table(category)
+
+nike$category=category
+
+#Create Sentiment Variable for Model. Takes value 0 if Negative, 1 if Positive or Neutral
+sentiment <- ifelse(nike$category=="Negative",0,1)
+nike$sentiment=sentiment
+
+#Category Table shows we have 604 negative, 559 Neutral and 1262 Positive tweets.
+```
+
+```{r, echo=FALSE, message=F, warning=F, comment="" }
+df = data.frame(y=nike[,28],nike[,9:30])
+
+#remove extra column and STR columns
+df = subset(df, select = -category)  #remove category b/c STR values
+df = subset(df, select = -retweets.1) #remove duplicate y variable
+df = subset(df, select = -tweet_possibly_sensitive) #remove column b/c contains NA values
+df = subset(df, select = -tweet_retweet_count)
+
+#Display all variables we will use for the models
+glimpse(df)
+```
+
+
+```{r train test, echo=FALSE, message=F, warning=F, comment="" }
+#Define training and Testing data first
+idTrn = 1:650  # row index for the training data
+idTst = !(1:nrow(nike) %in% idTrn)  # row index for the testing data
+
+#First model contains all original variables from the excel file.
+BasicBin = glm(retweets~ tweet_favorite_count+	tweet_is_quote_status+		user_default_profile+	user_default_profile_image+	user_favourites_count+ user_follow_request_sent+	user_followers_count+	user_friends_count+	user_geo_enabled+	user_has_extended_profile+	user_is_translation_enabled+	user_lang+	user_listed_count+	user_profile_use_background_image+	user_statuses_count+	user_translator_type+	user_verified
+, data=df, family="binomial") 
+
+BinTest = glm(retweets~   user_geo_enabled+ user_lang+ user_verified+ sentiment, data=df, family="binomial") 
+
+summary(BasicBin)
+
+yActual = df[idTst,1] #get the actual value for the choice variable
+predTst_basic = predict(BasicBin, df[idTst,], type="response") 
+
+#def pred and performance
+pred <- prediction(predTst_basic,yActual)
+perf <- performance(pred,"tpr","fpr")
+plot(perf,col='blue')
+
+#print score
+score <- performance(pred,measure="auc")
+print(paste("AUC= ", score@y.values[[1]]))
+
+```
+
+```{r Model 2, echo=FALSE, message=F, warning=F, comment="" }
+
+#second model removes ambigious colums sush as "user_profile_use_background_image", "user_geo_enabled", etc.. that probably do not contribute to tweets.
+Binary2 = glm(retweets~ tweet_favorite_count+	user_favourites_count+ 	user_followers_count+	user_friends_count+	user_lang+	user_statuses_count+	user_verified, data=df, family="binomial") 
+
+summary(Binary2)
+
+yActual = df[idTst,1] #get the actual value for the choice variable
+predTst_basic2 = predict(Binary2, df[idTst,], type="response") 
+
+#def pred and performance
+pred2 <- prediction(predTst_basic2,yActual)
+perf2 <- performance(pred2,"tpr","fpr")
+plot(perf2,col='blue')
+
+#print score
+score2 <- performance(pred2,measure="auc")
+print(paste("AUC= ", score2@y.values[[1]]))
+```
+
+```{r Model 3, echo=FALSE, message=F, warning=F, comment="" }
+
+#Third model adds dummy variable Popularuser which takes value 1 if user has over 1,000 followers
+df$popularuser= as.numeric(df$user_followers_count>1000)
+
+
+Binary3 = glm(retweets~ tweet_favorite_count+	user_favourites_count+ 	user_followers_count+	user_friends_count+	user_lang+	user_statuses_count+	user_verified+ popularuser, data=df, family="binomial") 
+
+summary(Binary3)
+
+yActual = df[idTst,1] #get the actual value for the choice variable
+predTst_basic3 = predict(Binary3, df[idTst,], type="response") 
+
+pred3 <- prediction(predTst_basic3,yActual)
+perf3 <- performance(pred3,"tpr","fpr")
+plot(perf3,col='blue')
+
+#print score
+score3 <- performance(pred3,measure="auc")
+print(paste("AUC= ", score3@y.values[[1]]))
+
+#Including the dummy variable "popularuser" actually decreases the AUC score. It doesn't seem like popular users will cause a tweet to be more likely to be shared. We should not include this. (Removed for last model)
+```
+
+```{r Model 4, echo=FALSE, message=F, warning=F, comment="" }
+
+#Lastly, add in sentiment score variable. Takes value for one if sentiment score is positive, 0 otherwise
+Binary4 = glm(retweets~ tweet_favorite_count+	user_favourites_count+ 	user_followers_count+	user_friends_count+	user_lang+	user_statuses_count+	user_verified+ sentiment, data=df, family="binomial") 
+
+summary(Binary4)
+
+yActual = df[idTst,1] #get the actual value for the choice variable
+predTst_basic4 = predict(Binary4, df[idTst,], type="response") 
+
+pred4 <- prediction(predTst_basic4,yActual)
+perf4 <- performance(pred3,"tpr","fpr")
+plot(perf4,col='blue')
+
+#print score
+score4 <- performance(pred4,measure="auc")
+print(paste("AUC= ", score4@y.values[[1]]))
+
+#It is good to include the Sentiment score. The model AUC score increases slightly, but it is an improvement.
+#In conclusion, for our best model, we remove ambigious variables, and include sentiment + all other variables listed above.
+```
+
+```{r Lnlikelyhood, echo=FALSE, message=F, warning=F, comment="" }
+#LN likelyhood scoress  <<<< only if you want to use, Don't have to.
+
+#Original model with all variables
+lnlike1 = sum(log(predTst_basic*yActual+(1-predTst_basic)*(1-yActual))) 
+lnlike1
+
+#Model 2
+lnlike2 = sum(log(predTst_basic2*yActual+(1-predTst_basic2)*(1-yActual))) 
+lnlike2
+
+#Model 3
+lnlike3 = sum(log(predTst_basic3*yActual+(1-predTst_basic3)*(1-yActual))) 
+lnlike3
+
+#Model 4
+lnlike4 = sum(log(predTst_basic4*yActual+(1-predTst_basic4)*(1-yActual))) 
+lnlike4
+```
+
+```{r KCluster, echo=FALSE, message=F, warning=F, comment="" }
+
+#=============Clustering=================
+
+#We decided to use the elbow method to see how many Clusters to choose. There is an elbow at 3, but the best one is at 5 clusters.
+#We decided to use 3,as might be a little difficult to track 5 segments. Less segments are usually better for analysis.
+df1 <- scale(na.omit(data.matrix(df)[-1]))
+wss <- (nrow(df1)-1)*sum(apply(df1,2,var))
+  for (i in 2:15) wss[i] <- sum(kmeans(df1,
+                                       centers=i)$withinss)
+plot(1:15, wss, type="b", xlab="Number of Clusters",
+     ylab="Within groups sum of squares")
+
+#Set K equal to 3
+k = 3
+
+#profile vars
+niketypevar = names(nike[,.(user_default_profile, user_default_profile_image,
+                            user_profile_use_background_image,
+                            user_has_extended_profile, user_geo_enabled,
+                            user_is_translation_enabled, user_translator_type,
+                            user_favourites_count, user_followers_count,
+                            user_friends_count, user_lang, user_listed_count,
+                            user_statuses_count, user_verified,
+                            tweet_favorite_count, tweet_is_quote_status,
+                            sentiment, tweet_retweet_count)])
+
+#normalize the data
+niketypevarnorm = paste0(niketypevar, "_n")
+nike[,(niketypevarnorm) := lapply(.SD, function(x) (x- mean(x))/sd(x)), .SDcols=niketypevar]
+
+nike_km = kmeans(nike[, ..niketypevarnorm],k)
+nike[, seg := nike_km$cluster]
+nike[, .N, seg][order(seg)]
+
+#Display which profile types are grouped
+a=nike[, lapply(.SD, mean), .SDcols = niketypevarnorm, seg][order(seg)]
+print(t(a))
+
+```
