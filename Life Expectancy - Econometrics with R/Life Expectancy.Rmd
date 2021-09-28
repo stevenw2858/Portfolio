@@ -1,0 +1,150 @@
+---
+title: 'Statistical Analysis on Factors Influencing Life Expectancy'
+author: "Kratika Sharma, Xiaokang Wu, Manasvini Hothur, Steven Wang"
+
+date: "12/06/20"
+output:
+  html_document: default
+  header-includes: \usepackage{color}
+fontsize: 12pt
+margin: 1in
+---
+<!--
+-->
+```{r setup, echo=FALSE, message=F, warning=F, comment=""}
+    rm(list = ls())
+
+### Load the packages
+    library(doBy)
+    library(dplyr)
+    library(foreign)
+    library(ggplot2)
+    library(knitr)
+    library(lmtest)
+    library(readstata13)
+    library(sandwich)
+    library(stargazer)
+    library(AER)
+    library(gdata)
+    library(OIdata)
+    library(wooldridge)
+
+cse=function(reg) {
+    rob=sqrt(diag(vcovHC(reg, type="HC1")))
+    return(rob)
+    }
+```
+
+```{r data, echo=FALSE, message=F, warning=FALSE, comment="",include=FALSE}
+
+#Data File for Countries from the year 2014
+
+life<-read.csv(file = 'life2014.csv', header=T, sep=",")
+```
+
+
+```{r table, echo=FALSE, message=F, warning=FALSE, comment="", message=F }
+
+#Created a summary table of 5 variables: Life Expectancy, GDP, Health Expenditure, Adult Mortality and Schooling
+
+stargazer(life[c("Life_expectancy", "GDP","Health_expenditure","Adult_Mortality","Schooling")], type="text", digits=2, summary.stat=c("n", "mean", "median", "sd"), title="Country Summary", flip=FALSE,
+          covariate.labels=c("Life Expectancy","GDP per Capita","Health Expenditure per Capita","Adult Mortality","Education (years)"))
+```
+
+
+```{r plot1, echo=FALSE, message=F, warning=FALSE,comment=""}
+
+#First graph is a regression plot of Life Expectancy on log GDP per Capita.
+
+ggplot(life, aes(x=log(GDP), y=Life_expectancy)) + geom_point(col="blue") +geom_text(aes(label=""), hjust=1, vjust=1)+
+        labs(title = "Life Expectancy vs log GDP per Capita", x = "log GDP per Capita ", y = "Life Expectancy") +
+        stat_smooth(method=lm, col = "red", se=FALSE)
+```
+
+
+
+
+```{r plot2, echo=FALSE, message=F, warning=FALSE,comment=""}
+
+#Second graph is a histogram plotting life expectancy. The hue is whether a country is developed or not.
+
+ggplot(data=life,aes(x=Life_expectancy,fill=Status))+geom_histogram() + 
+        labs(title = "Life Expectancy vs Status")
+```
+
+
+```{r Regressions, echo=FALSE, message=F, warning=FALSE,comment=""}
+
+#There was one outlier which had an very low life expectancy, but an average GDP. Adjusted dataset to exclude it as might have been entry error.
+
+lifex=subset(life, Country!="Equatorial Guinea")
+
+#Here are some variables we defined so we could display statistics and calculations more cleanly.
+#Created Dummy Variable for countries development status.
+#Log variable for GDP per Capita, Health Expenditure per Capita and Population.
+
+lifex$firstworld=ifelse(lifex$Status=="Developed",1,0)
+
+lifex$logGDP = log(lifex$GDP)
+lifex$logHealth_expenditure = log(lifex$Health_expenditure)
+lifex$logPopulation = log(lifex$Population)
+
+##Define regression lines
+reg1<-lm(Life_expectancy~ GDP, data=lifex)
+reg2<-lm(Life_expectancy~ logGDP+ logPopulation+logHealth_expenditure, data=lifex)
+reg3<-lm(Life_expectancy~ logGDP+ logPopulation+logHealth_expenditure+ Schooling, data=lifex)
+reg4<-lm(Life_expectancy~ logGDP+ logPopulation+logHealth_expenditure+ Schooling+ infant_deaths+Adult_Mortality, data=lifex)
+reg5<-lm(Life_expectancy~ logGDP+ logPopulation+logHealth_expenditure+ Schooling+ infant_deaths+  Adult_Mortality +I(infant_deaths^2), data=lifex)
+reg6<-lm(Life_expectancy~ logGDP+ logPopulation+logHealth_expenditure+ Schooling+ infant_deaths+  Adult_Mortality +I(infant_deaths^2)+ firstworld, data=lifex)
+
+#Display Regressions. 6 Regressions.
+stargazer(reg1,reg2,reg3,reg4,reg5,reg6, se=list(cse(reg1),cse(reg2),cse(reg3),cse(reg4),cse(reg5),cse(reg6)),title="Regression of Life Expectancy against GDP and other variables", type="text", star.cutoffs=NA, df=FALSE, digits=3)
+```
+
+
+```{r F-tests 1, echo=FALSE, message=F, warning=FALSE,comment=""}
+
+#compute f-tests
+#test if model 4 is better than model 2
+
+lht(reg4, c("Schooling=0","infant_deaths=0","Adult_Mortality=0"), white.adjust="hc1")
+```
+
+```{r F-tests 2, echo=FALSE, message=F, warning=FALSE,comment=""}
+
+#test if quadratic model better than linear model
+
+lht(reg5, c("I(infant_deaths^2)=0"), white.adjust="hc1")
+```
+
+
+```{r Predict, echo=FALSE, message=F, warning=FALSE,comment=""}
+
+#Below is the code for prediction, Variable values for USA found using Google.
+
+Agepredict<-lm(Life_expectancy~ GDP+ Population+Health_expenditure+ 
+Schooling+ infant_deaths+  Adult_Mortality+ firstworld, data=lifex)
+
+USApredict = data.frame(Population=318000000,GDP=50000,Schooling=13,
+Adult_Mortality=115,Health_expenditure=10000,infant_deaths = 5.7, firstworld=1)
+predict(Agepredict, USApredict)
+
+```
+
+
+
+```{r Alternative, echo=FALSE, message=F, warning=FALSE,comment=""}
+
+#Subset dataset for countries with a GDP <$4,000 per Capita
+life$GoodEducation=ifelse(life$Schooling>=13,1,0)
+GDPsmall=subset(life, GDP<4000)
+
+##Alternative Regressions. 3 Regressions.
+reg7<-lm(Life_expectancy~ log(GDP)+ log(Population)+log(Health_expenditure)+ Schooling+ infant_deaths+  Adult_Mortality +I(infant_deaths^2), data=GDPsmall)
+reg8<-lm(Life_expectancy~log(GDP)+ log(Population)+ log(Health_expenditure)+ Schooling+ infant_deaths+  Adult_Mortality +I(infant_deaths^2)+ HIV.AIDS+ thinness_youth, data=GDPsmall)
+reg9<-lm(Life_expectancy~log(GDP) + log(Population)+ log(Health_expenditure)+ infant_deaths+Adult_Mortality +I(infant_deaths^2)+ GoodEducation, data=GDPsmall)
+
+stargazer(reg7, reg8,reg9, se=list(cse(reg7),cse(reg8), cse(reg9)),title="Regressions for Life Expectancy on GDP and other variables for countries with GDP <4,000 USD per Capita", type="text", star.cutoffs=NA, df=FALSE, digits=3)
+
+```
+
